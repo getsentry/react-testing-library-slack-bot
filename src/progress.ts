@@ -1,37 +1,44 @@
-import {Octokit} from '@octokit/rest';
+import fs from 'fs';
+import {Clone} from 'nodegit';
+import path from 'path';
 
-const owner = 'getsentry';
-const repo = 'sentry';
+// temporary sentry cloned respository path
+const dirPath = path.join(__dirname, '../temp');
+const testsPath = path.join(__dirname, '../temp/tests/js/spec');
 
-export async function getProgress() {
-  const octokit = new Octokit();
+const getTestFiles = function (dirPath: string, arrayOfFiles: string[] | undefined = []) {
+  const files = fs.readdirSync(dirPath);
 
-  const content = await octokit.repos.getContent({
-    owner,
-    repo,
-    path: 'src/sentry/static/sentry',
+  files.forEach(function (file) {
+    if (fs.statSync(dirPath + '/' + file).isDirectory()) {
+      arrayOfFiles = getTestFiles(dirPath + '/' + file, arrayOfFiles);
+    } else {
+      if (/\.spec.*?$/.test(file)) {
+        arrayOfFiles.push(path.join(dirPath, '/', file));
+      }
+    }
   });
 
-  console.log({content});
+  return arrayOfFiles;
+};
 
-  // const app = contents.data.find(({name}) => name === 'app');
+export async function getProgress(data?: string) {
+  //delete cloned sentry repository
+  fs.rmdirSync(dirPath, {recursive: true});
 
-  // const tree = await octokit.git.getTree({
-  //   owner,
-  //   repo,
-  //   tree_sha: app.sha,
-  //   recursive: 1,
-  // });
+  // clone sentry repository
+  await Clone.clone('https://github.com/getsentry/sentry', dirPath);
 
-  // console.log({treee: tree.data.tree})
+  const testFiles = getTestFiles(testsPath);
+  const testFilesWithEnzymeImport = testFiles.filter(file => {
+    const base64Content = fs.readFileSync(file);
+    const content = Buffer.from(base64Content).toString('utf-8');
+    return content.includes('sentry-test/enzyme');
+  });
 
-  //   const jsxFiles = tree.data.tree.filter(({path}) => /\.jsx?$/.test(path)) || [];
-  //   const tsxFiles = tree.data.tree.filter(({path}) => /\.tsx?$/.test(path)) || [];
-
-  //   const total = jsxFiles.length + tsxFiles.length;
-
-  //   return {
-  //     remainingFiles: jsxFiles.length,
-  //     progress: Math.round((tsxFiles.length / total) * 10000) / 100,
-  //   };
+  return {
+    remainingFiles: testFilesWithEnzymeImport.length,
+    progress:
+      Math.round((testFilesWithEnzymeImport.length / testFiles.length) * 10000) / 100,
+  };
 }

@@ -20,9 +20,11 @@ app.command('/knowledge', async ({ack, say}) => {
 });
 
 app.message(/status/, async ({event, say}) => {
-  await getProgress();
-
   try {
+    const {remainingFiles, progress} = await getProgress();
+
+    console.log({remainingFiles, progress});
+
     say('Yaaay! that command works!');
   } catch (error) {
     console.log('err');

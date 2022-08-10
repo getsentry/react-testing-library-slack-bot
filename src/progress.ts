@@ -1,10 +1,10 @@
 import fs from 'fs';
-import {Clone} from 'nodegit';
 import path from 'path';
+import child_process from 'child_process';
 
 // temporary sentry cloned respository path
-const dirPath = path.join(__dirname, '../temp');
-const testsPath = path.join(__dirname, '../temp/tests/js/spec');
+const dirPath = './tmp';
+const testsPath = './tmp/tests/js/spec';
 
 const getTestFiles = function (dirPath: string, arrayOfFiles: string[] | undefined = []) {
   const files = fs.readdirSync(dirPath);
@@ -24,10 +24,12 @@ const getTestFiles = function (dirPath: string, arrayOfFiles: string[] | undefin
 
 export async function getProgress(data?: string) {
   //delete cloned sentry repository
-  fs.rmdirSync(dirPath, {recursive: true});
+  if (fs.existsSync(dirPath)) {
+    fs.rmdirSync(dirPath, {recursive: true});
+  }
 
   // clone sentry repository
-  await Clone.clone('https://github.com/getsentry/sentry', dirPath);
+  child_process.execSync(`git clone git@github.com:getsentry/sentry.git ${dirPath}`);
 
   const testFiles = getTestFiles(testsPath);
   const testFilesWithEnzymeImport = testFiles.filter(file => {

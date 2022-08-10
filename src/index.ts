@@ -9,26 +9,42 @@ const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
-app.command('/knowledge', async ({ack, say}) => {
-  try {
-    await ack();
-    say('Yaaay! that command works!');
-  } catch (error) {
-    console.log('err');
-    console.error(error);
-  }
-});
-
-app.message(/status/, async ({event, say}) => {
-  try {
+app.event('app_mention', async ({event, say}) => {
+  if (event.text.includes('rtl')) {
+    const {channel, ts} = await say({
+      text: ':sentry-loading: fetching status ...',
+      blocks: [
+        {
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: ':sentry-loading: fetching status ...',
+            },
+          ],
+        },
+      ],
+    });
     const {remainingFiles, progress} = await getProgress();
 
-    console.log({remainingFiles, progress});
+    if (!channel || !ts) {
+      return;
+    }
 
-    say('Yaaay! that command works!');
-  } catch (error) {
-    console.log('err');
-    console.error(error);
+    await app.client.chat.update({
+      channel,
+      ts,
+      text: `RTL progress: ${progress}% completed, ${remainingFiles} files remaining`,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `:rtl: progress: *${progress}%* completed, *${remainingFiles}* files remaining`,
+          },
+        },
+      ],
+    });
   }
 });
 

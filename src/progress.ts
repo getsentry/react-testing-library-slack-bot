@@ -1,27 +1,56 @@
 import {Octokit} from '@octokit/rest';
 import {RequestError} from './error';
 import fs from 'fs';
-import tar from 'tar';
 import path from 'path';
+import concatStream from 'concat-stream';
+import tar from 'tar';
+import {PassThrough as PassThroughStream} from 'stream';
 
 const owner = 'getsentry';
 const repo = 'sentry';
 
-const getTestFiles = function (dirPath: string, arrayOfFiles: string[] | undefined = []) {
-  const files = fs.readdirSync(dirPath);
+function bufferToStream(buffer: Buffer): NodeJS.ReadableStream {
+  const stream = new PassThroughStream();
+  stream.end(buffer);
+  return stream;
+}
 
-  files.forEach(function (file) {
-    if (fs.statSync(dirPath + '/' + file).isDirectory()) {
-      arrayOfFiles = getTestFiles(dirPath + '/' + file, arrayOfFiles);
-    } else {
-      if (/\.spec.*?$/.test(file)) {
-        arrayOfFiles.push(path.join(dirPath, '/', file));
-      }
+function extractFilesFromTarball(tarball: Buffer) {
+  return new Promise<{testFilesWithEnzymeImport: number; totalFiles: number}>(
+    (resolve, reject) => {
+      let testFilesWithEnzymeImport = 0;
+      let totalFiles = 0;
+
+      const parser = new tar.Parse({
+        strict: true,
+        filter: (currentPath: string) => /\.spec.*?$/.test(currentPath),
+        onentry: entry => {
+          entry.on('data', chunk => {
+            totalFiles += 1;
+            const content = Buffer.from(chunk).toString('utf-8');
+            if (content.includes('sentry-test/enzyme')) {
+              testFilesWithEnzymeImport += 1;
+            }
+          });
+
+          entry.on('end', () => {
+            resolve({testFilesWithEnzymeImport, totalFiles});
+          });
+
+          entry.on('error', err => {
+            reject(err);
+          });
+        },
+      });
+      bufferToStream(tarball)
+        .pipe(parser)
+        .on('end', () => {
+          console.log({testFilesWithEnzymeImport});
+          resolve({testFilesWithEnzymeImport, totalFiles});
+        });
     }
-  });
-
-  return arrayOfFiles;
-};
+  );
+}
 
 export async function getProgress() {
   const octokit = new Octokit();
@@ -42,17 +71,6 @@ export async function getProgress() {
     throw new RequestError('Invalid directory', 400);
   }
 
-  const testsPath = `getsentry-sentry-${spec.sha.slice(0, 7)}`;
-
-  // Delete existing files
-  if (fs.existsSync(testsPath)) {
-    fs.rmSync(testsPath, {recursive: true});
-  }
-
-  if (fs.existsSync('spec.tar.gz')) {
-    fs.rmSync('spec.tar.gz', {recursive: true});
-  }
-
   // Download the archive
   const response = await octokit.rest.repos.downloadTarballArchive({
     owner,
@@ -61,24 +79,13 @@ export async function getProgress() {
   });
 
   // @ts-ignore https://github.com/octokit/types.ts/issues/211
-  const archiveData = Buffer.from(response.data);
+  const buffer = Buffer.from(response.data);
 
-  // Write archive to disk
-  await fs.promises.writeFile('spec.tar.gz', archiveData);
-
-  // Extract archive
-  await tar.extract({file: 'spec.tar.gz'});
-
-  const testFiles = getTestFiles(testsPath);
-  const testFilesWithEnzymeImport = testFiles.filter(file => {
-    const base64Content = fs.readFileSync(file);
-    const content = Buffer.from(base64Content).toString('utf-8');
-    return content.includes('sentry-test/enzyme');
-  });
+  const {testFilesWithEnzymeImport, totalFiles} = await extractFilesFromTarball(buffer);
+  console.log({testFilesWithEnzymeImport, totalFiles});
 
   return {
-    remainingFiles: testFilesWithEnzymeImport.length,
-    progress:
-      Math.round((testFilesWithEnzymeImport.length / testFiles.length) * 10000) / 100,
+    remainingFiles: testFilesWithEnzymeImport,
+    progress: Math.round((testFilesWithEnzymeImport / totalFiles) * 10000) / 100,
   };
 }

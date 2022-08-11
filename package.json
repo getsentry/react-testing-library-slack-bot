@@ -11,10 +11,13 @@
     "dev": "nodemon --watch 'src' --exec 'ts-node' src/index.ts"
   },
   "dependencies": {
-    "@slack/bolt": "^3.12.1"
+    "@octokit/rest": "^19.0.3",
+    "@slack/bolt": "^3.12.1",
+    "tar": "^6.1.11"
   },
   "devDependencies": {
     "@types/nodegit": "^0.27.10",
+    "@types/tar": "^6.1.2",
     "dotenv": "^16.0.1",
     "nodemon": "^2.0.19",
     "prettier": "2.7.1",

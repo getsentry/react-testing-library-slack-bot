@@ -1,10 +1,11 @@
+import {Octokit} from '@octokit/rest';
+import {RequestError} from './error';
 import fs from 'fs';
+import tar from 'tar';
 import path from 'path';
-import child_process from 'child_process';
 
-// temporary sentry cloned respository path
-const dirPath = './tmp';
-const testsPath = './tmp/tests/js/spec';
+const owner = 'getsentry';
+const repo = 'sentry';
 
 const getTestFiles = function (dirPath: string, arrayOfFiles: string[] | undefined = []) {
   const files = fs.readdirSync(dirPath);
@@ -22,14 +23,51 @@ const getTestFiles = function (dirPath: string, arrayOfFiles: string[] | undefin
   return arrayOfFiles;
 };
 
-export async function getProgress(data?: string) {
-  //delete cloned sentry repository
-  if (fs.existsSync(dirPath)) {
-    fs.rmdirSync(dirPath, {recursive: true});
+export async function getProgress() {
+  const octokit = new Octokit();
+
+  const content = await octokit.repos.getContent({
+    owner,
+    repo,
+    path: 'tests/js',
+  });
+
+  if (!Array.isArray(content.data)) {
+    throw new RequestError('Invalid directory', 400);
   }
 
-  // clone sentry repository
-  child_process.execSync(`git clone git@github.com:getsentry/sentry.git ${dirPath}`);
+  const spec = content.data.find(({name}) => name === 'spec');
+
+  if (!spec) {
+    throw new RequestError('Invalid directory', 400);
+  }
+
+  const testsPath = `getsentry-sentry-${spec.sha.slice(0, 7)}`;
+
+  // Delete existing files
+  if (fs.existsSync(testsPath)) {
+    fs.rmSync(testsPath, {recursive: true});
+  }
+
+  if (fs.existsSync('spec.tar.gz')) {
+    fs.rmSync('spec.tar.gz', {recursive: true});
+  }
+
+  // Download the archive
+  const response = await octokit.rest.repos.downloadTarballArchive({
+    owner,
+    repo,
+    ref: spec.sha,
+  });
+
+  // @ts-ignore https://github.com/octokit/types.ts/issues/211
+  const archiveData = Buffer.from(response.data);
+
+  // Write archive to disk
+  await fs.promises.writeFile('spec.tar.gz', archiveData);
+
+  // Extract archive
+  await tar.extract({file: 'spec.tar.gz'});
 
   const testFiles = getTestFiles(testsPath);
   const testFilesWithEnzymeImport = testFiles.filter(file => {
